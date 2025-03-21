@@ -1,6 +1,7 @@
 # Energy Game ⚡
 
-Energy Game is a simple HTML, CSS, and JavaScript game designed to take away boredom at work!
+Energy Game is a simple HTML, CSS, and JavaScript game designed to take away boredom at work.
+
  We experienced periodic power outages for power maintenance and I built this so we all play locally and share high scores.
 
 ## 🚀 How to Play
