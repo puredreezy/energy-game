@@ -8,6 +8,8 @@ We have periodic power outages for power maintenance and I built this so we all 
 - Navigate through the game and avoid obstacles.
 - Collect energy boosts to score points.
 
+![image](https://github.com/user-attachments/assets/d51d001f-0531-43ed-9e4e-d074876b032e)
+
 ## 🛠️ Installation
 - Clone the repo:  
   ```bash
