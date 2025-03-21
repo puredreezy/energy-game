@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Energy Game</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      background-color: #e0f7fa;
+      font-family: Arial, sans-serif;
+    }
+    .canvas-container {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      width: 100%;
+      height: 100%;
+    }
+    canvas {
+      max-width: 90vw;
+      max-height: 90vh;
+      border: 4px solid #00796b;
+      border-radius: 10px;
+      box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+      background-color: skyblue;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div class="canvas-container">
+    <!-- Internal resolution: 1400 x 700 -->
+    <canvas id="gameCanvas" width="1400" height="700"></canvas>
+  </div>
+  
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // Game variables
+    let batteryLevel = 100;
+    let score = 0;
+    const gravity = 0.5;
+    const normalJumpStrength = -14;    // Normal jump strength
+    const poweredJumpStrength = -18;   // Blue power-up jump strength
+    let isJumping = false;
+    let gameStarted = false;
+    let gameOver = false;
+    
+    // Pause states
+    let userPause = false;
+    let diedPause = false;
+    
+    // Lives (max 3)
+    let lives = 3;
+    
+    // Power-up state
+    let powerupActive = false;
+    let powerupTimeLeft = 0; // seconds
+
+    // Timer for power-up re-spawn (if not available and not active)
+    let nextPowerupDelay = Math.random() * 20 + 10; // random between 10 and 30 seconds
+    let powerupTimer = nextPowerupDelay;
+    
+    // Dynamic difficulty: base speed increases with score
+    const baseSpeed = 4;
+    function getCurrentSpeed() {
+      return baseSpeed + Math.floor(score / 50);
+    }
+    
+    // Player (stick figure)
+    const player = {
+      x: 100,
+      y: 500,
+      width: 40,
+      height: 80,
+      velocityY: 0
+    };
+    
+    // Normal obstacle (red rectangle)
+    const obstacle = {
+      x: 1400,
+      y: 630,
+      width: 40,
+      height: 70,
+      type: "normal"
+    };
+    
+    // Coin (gold or diamond)
+    const coin = {
+      x: 1000,
+      y: Math.random() * 20 + 500,  // Spawn mostly between 500 and 520
+      radius: 20,
+      type: Math.random() < 0.1 ? 'diamond' : 'gold'
+    };
+    
+    // Blue power-up (square)
+    let powerup = {
+      x: canvas.width + 400,
+      y: Math.random() * 50 + 500,  // Spawn between 500 and 550
+      width: 40,
+      height: 40,
+      available: true
+    };
+    
+    // Weighted coin spawn: coins appear low so they're reachable
+    function spawnCoin() {
+      if (Math.random() < 0.8) {
+        coin.y = Math.random() * 20 + 500;
+      } else {
+        coin.y = Math.random() * 30 + 520;
+      }
+      coin.x = canvas.width + Math.random() * 300;
+      coin.type = Math.random() < 0.1 ? 'diamond' : 'gold';
+    }
+    spawnCoin();
+    
+    // ------------------ DRAWING FUNCTIONS ------------------
+    
+    // Helper: draw rounded rectangle for UI panel
+    function drawRoundedRect(x, y, width, height, radius, fillColor) {
+      ctx.beginPath();
+      ctx.moveTo(x + radius, y);
+      ctx.lineTo(x + width - radius, y);
+      ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+      ctx.lineTo(x + width, y + height - radius);
+      ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+      ctx.lineTo(x + radius, y + height);
+      ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+      ctx.lineTo(x, y + radius);
+      ctx.quadraticCurveTo(x, y, x + radius, y);
+      ctx.closePath();
+      ctx.fillStyle = fillColor;
+      ctx.fill();
+    }
+    
+    function drawPlayer() {
+      if (powerupActive) {
+        ctx.strokeStyle = 'blue';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.arc(player.x + player.width / 2, player.y + 20, player.width, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.fillStyle = '#ffcc99';
+      ctx.beginPath();
+      const headRadius = 15;
+      const headCenterX = player.x + player.width / 2;
+      const headCenterY = player.y + headRadius;
+      ctx.arc(headCenterX, headCenterY, headRadius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(headCenterX, headCenterY + headRadius);
+      ctx.lineTo(headCenterX, player.y + 55);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(headCenterX, player.y + 25);
+      ctx.lineTo(headCenterX - 20, player.y + 40);
+      ctx.moveTo(headCenterX, player.y + 25);
+      ctx.lineTo(headCenterX + 20, player.y + 40);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(headCenterX, player.y + 55);
+      ctx.lineTo(headCenterX - 15, player.y + player.height);
+      ctx.moveTo(headCenterX, player.y + 55);
+      ctx.lineTo(headCenterX + 15, player.y + player.height);
+      ctx.stroke();
+    }
+    
+    function drawObstacle() {
+      ctx.fillStyle = '#d84315';
+      ctx.fillRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
+    }
+    
+    function drawCoin() {
+      if (coin.type === 'gold') {
+        ctx.fillStyle = 'gold';
+        ctx.beginPath();
+        ctx.arc(coin.x, coin.y, coin.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.3)';
+        ctx.beginPath();
+        ctx.arc(coin.x, coin.y, coin.radius / 2, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        ctx.fillStyle = 'deepskyblue';
+        ctx.beginPath();
+        ctx.moveTo(coin.x, coin.y - coin.radius);
+        ctx.lineTo(coin.x + coin.radius, coin.y);
+        ctx.lineTo(coin.x, coin.y + coin.radius);
+        ctx.lineTo(coin.x - coin.radius, coin.y);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = 'white';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+    }
+    
+    function drawPowerup() {
+      if (powerup.available) {
+        ctx.fillStyle = 'blue';
+        ctx.fillRect(powerup.x, powerup.y, powerup.width, powerup.height);
+      }
+    }
+    
+    // Battery bar: 200x40 at top-right; turns red below 50%
+    function drawBatteryBar() {
+      const barWidth = 200;
+      const barHeight = 40;
+      const x = canvas.width - barWidth - 70;
+      const y = 70;
+      ctx.fillStyle = batteryLevel < 50 ? 'red' : 'lightgreen';
+      ctx.fillRect(x, y, (batteryLevel / 100) * barWidth, barHeight);
+      ctx.strokeStyle = 'black';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x, y, barWidth, barHeight);
+      ctx.fillStyle = 'black';
+      ctx.font = '32px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('Battery', x + barWidth / 2, y + barHeight + 35);
+    }
+    
+    // Modern UI Panel for Score, Power-Up, and Lives
+    function drawUIPanel() {
+      const panelX = 50;
+      const panelY = 50;
+      const panelWidth = 320;
+      const panelHeight = 160;
+      const cornerRadius = 15;
+      drawRoundedRect(panelX, panelY, panelWidth, panelHeight, cornerRadius, 'rgba(0,0,0,0.3)');
+      
+      let textX = panelX + 20;
+      let textY = panelY + 45;
+      ctx.textAlign = 'left';
+      
+      ctx.fillStyle = 'white';
+      ctx.font = '36px Arial';
+      ctx.fillText('Score: ' + score, textX, textY);
+      textY += 40;
+      
+      if (powerupActive) {
+        ctx.fillStyle = '#ffff00'; // Bright yellow
+        ctx.font = '28px Arial';
+        ctx.fillText('Power-Up: ' + powerupTimeLeft.toFixed(1) + 's', textX, textY);
+        textY += 35;
+      }
+      
+      ctx.fillStyle = 'red';
+      ctx.font = '36px Arial';
+      let heartsX = textX;
+      ctx.fillText('Lives: ', textX, textY);
+      heartsX += 110;
+      for (let i = 0; i < lives; i++) {
+        ctx.fillText('♥', heartsX, textY);
+        heartsX += 40;
+      }
+    }
+    
+    function drawStartScreen() {
+      ctx.fillStyle = 'rgba(0,0,0,0.4)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = 'white';
+      ctx.font = '56px Arial';
+      ctx.fillText('Press Space to Start', canvas.width / 2, canvas.height / 2);
+    }
+    
+    function drawUserPauseScreen() {
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = 'white';
+      ctx.font = '70px Arial';
+      ctx.fillText('Game Paused', canvas.width / 2, canvas.height / 2 - 60);
+      ctx.font = '44px Arial';
+      ctx.fillText('Score: ' + score, canvas.width / 2, canvas.height / 2);
+      ctx.font = '32px Arial';
+      ctx.fillText('Press ESC to Resume', canvas.width / 2, canvas.height / 2 + 60);
+    }
+    
+    function drawDiedPauseScreen() {
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = 'white';
+      ctx.font = '70px Arial';
+      ctx.fillText('You Died', canvas.width / 2, canvas.height / 2 - 60);
+      ctx.font = '44px Arial';
+      ctx.fillText('Your Score: ' + score, canvas.width / 2, canvas.height / 2);
+      ctx.font = '32px Arial';
+      ctx.fillText('Press Space to Continue', canvas.width / 2, canvas.height / 2 + 60);
+    }
+    
+    function drawGameOverScreen() {
+      ctx.fillStyle = 'rgba(0,0,0,0.7)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = 'white';
+      ctx.font = '80px Arial';
+      ctx.fillText('Game Over', canvas.width / 2, canvas.height / 2 - 80);
+      ctx.font = '56px Arial';
+      ctx.fillText('Your Score: ' + score, canvas.width / 2, canvas.height / 2);
+      ctx.font = '36px Arial';
+      ctx.fillText('Press Space to Restart', canvas.width / 2, canvas.height / 2 + 80);
+    }
+    
+    // -------------------- COLLISION FUNCTIONS --------------------
+    function detectCollision(rect1, rect2) {
+      return (
+        rect1.x < rect2.x + rect2.width &&
+        rect1.x + rect1.width > rect2.x &&
+        rect1.y < rect2.y + rect2.height &&
+        rect1.y + rect1.height > rect2.y
+      );
+    }
+    function detectCoinCollision(player, coin) {
+      const distX = Math.abs((player.x + player.width / 2) - coin.x);
+      const distY = Math.abs((player.y + player.height / 2) - coin.y);
+      return (distX < (player.width / 2 + coin.radius)) && (distY < (player.height / 2 + coin.radius));
+    }
+    function detectPowerupCollision(player, powerup) {
+      return (
+        player.x < powerup.x + powerup.width &&
+        player.x + player.width > powerup.x &&
+        player.y < powerup.y + powerup.height &&
+        player.y + player.height > powerup.y
+      );
+    }
+    
+    // -------------------- MAIN UPDATE LOOP --------------------
+    let lastTimestamp = 0;
+    function update(timestamp) {
+      if (!lastTimestamp) lastTimestamp = timestamp;
+      const deltaTime = (timestamp - lastTimestamp) / 1000;
+      lastTimestamp = timestamp;
+      
+      if (gameOver) {
+        drawGameOverScreen();
+        return;
+      }
+      if (!gameStarted) {
+        drawStartScreen();
+        requestAnimationFrame(update);
+        return;
+      }
+      if (userPause) {
+        drawUserPauseScreen();
+        requestAnimationFrame(update);
+        return;
+      }
+      if (diedPause) {
+        drawDiedPauseScreen();
+        requestAnimationFrame(update);
+        return;
+      }
+      
+      // Handle jumping
+      if (isJumping) {
+        player.velocityY = powerupActive ? poweredJumpStrength : normalJumpStrength;
+        isJumping = false;
+      }
+      player.velocityY += gravity;
+      player.y += player.velocityY;
+      if (player.y > 620) {
+        player.y = 620;
+        player.velocityY = 0;
+      }
+      
+      // Move obstacle (single obstacle version)
+      const currentSpeed = getCurrentSpeed();
+      obstacle.x -= currentSpeed;
+      if (obstacle.x < -obstacle.width) {
+        obstacle.x = canvas.width + Math.random() * 400;
+        obstacle.y = 630;
+        obstacle.height = 50;
+      }
+      
+      // Move coin
+      coin.x -= currentSpeed;
+      if (coin.x < -coin.radius * 2) {
+        spawnCoin();
+      }
+      
+      // Power-up logic
+      if (powerup.available) {
+        powerup.x -= currentSpeed;
+        if (powerup.x < -powerup.width) {
+          powerup.available = false;
+        }
+      } else if (!powerupActive) {
+        powerupTimer -= deltaTime;
+        if (powerupTimer <= 0) {
+          powerup = {
+            x: canvas.width + 300 + Math.random() * 300,
+            y: Math.random() * 50 + 500,
+            width: 40,
+            height: 40,
+            available: true
+          };
+          nextPowerupDelay = Math.random() * 20 + 10;
+          powerupTimer = nextPowerupDelay;
+        }
+      }
+      
+      // Collision checks
+      const playerRect = { x: player.x, y: player.y, width: player.width, height: player.height };
+      const obstacleRect = { x: obstacle.x, y: obstacle.y, width: obstacle.width, height: obstacle.height };
+      
+      if (detectCollision(playerRect, obstacleRect)) {
+        if (lives > 1) {
+          lives--;
+          diedPause = true;
+          player.y = 620;
+          player.velocityY = 0;
+          obstacle.x = canvas.width + Math.random() * 400;
+        } else {
+          gameOver = true;
+        }
+      }
+      
+      if (detectCoinCollision(playerRect, coin)) {
+        if (coin.type === 'gold') {
+          score += 10;
+          batteryLevel = Math.min(batteryLevel + 20, 100);
+        } else {
+          score += 20;
+          batteryLevel = 100;
+        }
+        spawnCoin();
+      }
+      
+      if (powerup.available && detectPowerupCollision(playerRect, powerup)) {
+        powerupActive = true;
+        powerupTimeLeft = 15;
+        powerup.available = false;
+        nextPowerupDelay = Math.random() * 20 + 10;
+        powerupTimer = nextPowerupDelay;
+      }
+      
+      if (powerupActive) {
+        powerupTimeLeft -= deltaTime;
+        if (powerupTimeLeft <= 0) {
+          powerupActive = false;
+        }
+      }
+      
+      // Slow battery drain: 0.06 per frame normally, 0.03 when powered up.
+      batteryLevel -= powerupActive ? 0.03 : 0.06;
+      if (batteryLevel <= 0) {
+        gameOver = true;
+      }
+      
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawPlayer();
+      drawObstacle();
+      drawCoin();
+      drawPowerup();
+      drawBatteryBar();
+      drawUIPanel();
+      
+      requestAnimationFrame(update);
+    }
+    
+    // -------------------- KEYBOARD LISTENER --------------------
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'Space') {
+        if (gameOver) {
+          document.location.reload();
+        } else if (!gameStarted) {
+          gameStarted = true;
+        } else if (diedPause) {
+          diedPause = false;
+        } else if (player.y >= 620) {
+          isJumping = true;
+        }
+      }
+      if (e.code === 'Escape') {
+        if (!diedPause && !gameOver) {
+          userPause = !userPause;
+        }
+      }
+    });
+    
+    requestAnimationFrame(update);
+  </script>
+</body>
+</html>
